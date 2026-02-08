@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>EOD Specialist: Color Sweeper</title>
+    <style>
+        :root {
+            --bg: #f4f7f6;
+            --tile-base: #e0e4e8;
+            --accent: #2c3e50;
+        }
+        body { font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; background: var(--bg); padding: 20px; }
+        
+        /* 난이도 선택 화면 */
+        #start-screen {
+            text-align: center; background: white; padding: 30px; border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        .diff-btn {
+            padding: 12px 25px; margin: 10px; font-size: 1rem; cursor: pointer;
+            border: none; border-radius: 8px; transition: 0.3s; color: white;
+        }
+        .btn-easy { background: #2ecc71; }
+        .btn-medium { background: #f39c12; }
+        .btn-hard { background: #e74c3c; }
+        .diff-btn:hover { opacity: 0.8; transform: translateY(-2px); }
+
+        /* 게임 화면 컨트롤 */
+        #game-container { display: none; flex-direction: column; align-items: center; }
+        .controls { margin-bottom: 20px; display: flex; gap: 15px; align-items: center; }
+        .mode-btn {
+            padding: 10px 20px; font-size: 1rem; font-weight: bold; cursor: pointer;
+            border: none; border-radius: 8px; transition: 0.3s;
+            background: #95a5a6; color: white;
+        }
+        .mode-btn.active { background: #e74c3c; box-shadow: 0 0 15px rgba(231, 76, 60, 0.5); }
+
+        #board { 
+            display: grid; gap: 4px; padding: 10px; 
+            background: #bdc3c7; border-radius: 12px; position: relative;
+        }
+
+        .tile {
+            width: 50px; height: 50px; background: var(--tile-base);
+            border-radius: 6px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: bold; font-size: 1.2rem; position: relative;
+            z-index: 5; overflow: hidden; box-shadow: inset 0 -3px 0 rgba(0,0,0,0.1);
+        }
+
+        .color-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            mix-blend-mode: multiply; pointer-events: none;
+        }
+
+        .tile.revealed { background: #fff; cursor: default; box-shadow: none; }
+        .tile.defused { background: #2ecc71 !important; color: white; }
+        .tile.mine { background: #2c3e50 !important; color: white; }
+
+        .n-1 { color: #FFD600; } 
+        .n-2 { color: #2979FF; } 
+        .n-3 { color: #FF1744; } 
+
+        .status-text { margin-top: 10px; font-weight: bold; color: #2c3e50; }
+        .back-btn { margin-top: 20px; background: none; border: 1px solid #ccc; padding: 5px 10px; border-radius: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+    <div id="start-screen">
+        <h1>EOD Specialist 🛠️</h1>
+        <p>Choose Difficulty</p>
+        <button class="diff-btn btn-easy" onclick="startGame('easy')">Easy (8x8)</button>
+        <button class="diff-btn btn-medium" onclick="startGame('medium')">Medium (12x12)</button>
+        <button class="diff-btn btn-hard" onclick="startGame('hard')">Hard (16x16)</button>
+    </div>
+
+    <div id="game-container">
+        <div class="controls">
+            <button id="defuseBtn" class="mode-btn" onclick="toggleDefuseMode()">Defuse Mode: OFF</button>
+            <div id="mineCount" class="status-text">Mines Left: 0</div>
+        </div>
+        
+        <div id="board" oncontextmenu="return false;"></div>
+        
+        <button class="back-btn" onclick="goBack()">← Back to Menu</button>
+    </div>
+
+    <script>
+        let config = { size: 8, mines: 10 };
+        let board = [];
+        let defuseMode = false;
+        let minesFound = 0;
+        const colors = { 1: "rgba(255, 214, 0, 0.4)", 2: "rgba(41, 121, 255, 0.4)", 3: "rgba(255, 23, 68, 0.4)" };
+
+        function startGame(level) {
+            if(level === 'easy') config = { size: 8, mines: 10 };
+            else if(level === 'medium') config = { size: 12, mines: 25 };
+            else if(level === 'hard') config = { size: 16, mines: 50 };
+
+            document.getElementById('start-screen').style.display = 'none';
+            document.getElementById('game-container').style.display = 'flex';
+            initGame();
+        }
+
+        function goBack() {
+            document.getElementById('start-screen').style.display = 'block';
+            document.getElementById('game-container').style.display = 'none';
+        }
+
+        function initGame() {
+            const el = document.getElementById('board');
+            el.style.gridTemplateColumns = `repeat(${config.size}, 1fr)`;
+            el.innerHTML = '';
+            minesFound = 0;
+            defuseMode = false;
+            toggleDefuseMode(false);
+            
+            board = Array.from({length: config.size}, () => Array(config.size).fill(null).map(() => ({
+                isMine: false, revealed: false, defused: false, n: 0
+            })));
+
+            let p = 0;
+            while(p < config.mines) {
+                let r = Math.floor(Math.random()*config.size), c = Math.floor(Math.random()*config.size);
+                if(!board[r][c].isMine) { board[r][c].isMine = true; p++; }
+            }
+
+            for(let r=0; r<config.size; r++) {
+                for(let c=0; c<config.size; c++) {
+                    let count = 0;
+                    for(let i=-1; i<=1; i++) for(let j=-1; j<=1; j++) if(board[r+i]?.[c+j]?.isMine) count++;
+                    board[r][c].n = count;
+                    createTile(r, c);
+                }
+            }
+            updateStatus();
+        }
+
+        function createTile(r, c) {
+            const tile = document.createElement('div');
+            tile.className = 'tile';
+            tile.id = `t-${r}-${c}`;
+            tile.onmouseenter = () => updateBoardColors(r, c, true);
+            tile.onmouseleave = () => updateBoardColors(r, c, false);
+            tile.onclick = () => handleTileClick(r, c);
+            document.getElementById('board').appendChild(tile);
+        }
+
+        function toggleDefuseMode(forceState) {
+            defuseMode = (typeof forceState === 'boolean') ? forceState : !defuseMode;
+            const btn = document.getElementById('defuseBtn');
+            btn.innerText = defuseMode ? "Defuse Mode: ON ⚡" : "Defuse Mode: OFF";
+            btn.classList.toggle('active', defuseMode);
+        }
+
+        function handleTileClick(r, c) {
+            const d = board[r][c];
+            if (d.revealed || d.defused) return;
+
+            if (defuseMode) {
+                if (d.isMine) {
+                    d.defused = true;
+                    minesFound++;
+                    const el = document.getElementById(`t-${r}-${c}`);
+                    el.classList.add('defused');
+                    el.innerText = '🛡️';
+                    updateStatus();
+                    toggleDefuseMode(false); // 한 번 사용 후 해제
+                    if (minesFound === config.mines) {
+                        setTimeout(() => { alert("Mission Accomplished!"); goBack(); }, 100);
+                    }
+                } else {
+                    gameOver("Mistake! That wasn't a mine. BOOM!");
+                }
+            } else {
+                if (d.isMine) {
+                    gameOver("You stepped on a mine!");
+                } else {
+                    reveal(r, c);
+                }
+            }
+        }
+
+        function reveal(r, c) {
+            const d = board[r][c];
+            if(d.revealed || d.defused) return;
+            d.revealed = true;
+            const el = document.getElementById(`t-${r}-${c}`);
+            el.classList.add('revealed');
+            
+            if(d.n > 0) {
+                el.innerText = d.n;
+                el.classList.add(`n-${Math.min(d.n, 3)}`);
+            } else {
+                for(let i=-1; i<=1; i++) for(let j=-1; j<=1; j++) if(board[r+i]?.[c+j]) reveal(r+i, c+j);
+            }
+            updateBoardColors(r, c, false);
+        }
+
+        function updateBoardColors(hoverR, hoverC, isHover) {
+            document.querySelectorAll('.color-overlay').forEach(el => el.remove());
+            for(let r=0; r<config.size; r++) {
+                for(let c=0; c<config.size; c++) {
+                    if (board[r][c].revealed && board[r][c].n > 0) applyInfluence(r, c, board[r][c].n);
+                }
+            }
+            if (isHover && board[hoverR][hoverC].revealed && board[hoverR][hoverC].n > 0) applyInfluence(hoverR, hoverC, board[hoverR][hoverC].n);
+        }
+
+        function applyInfluence(centerR, centerC, n) {
+            const color = colors[Math.min(n, 3)];
+            for(let i=-1; i<=1; i++) {
+                for(let j=-1; j<=1; j++) {
+                    const nr = centerR + i, nc = centerC + j;
+                    if (board[nr]?.[nc] && !board[nr][nc].revealed && !board[nr][nc].defused) {
+                        const targetTile = document.getElementById(`t-${nr}-${nc}`);
+                        const overlay = document.createElement('div');
+                        overlay.className = 'color-overlay';
+                        overlay.style.backgroundColor = color;
+                        targetTile.appendChild(overlay);
+                    }
+                }
+            }
+        }
+
+        function updateStatus() {
+            document.getElementById('mineCount').innerText = `Mines Remaining: ${config.mines - minesFound}`;
+        }
+
+        function gameOver(msg) {
+            alert(msg);
+            goBack();
+        }
+    </script>
+</body>
+</html>
