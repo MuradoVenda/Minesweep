@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EOD Specialist: Final Edition</title>
+    <style>
+        :root { --bg: #f4f7f6; --tile-base: #e0e4e8; --accent: #2c3e50; --success: #2ecc71; --fail: #e74c3c; }
+        body { font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; background: var(--bg); padding: 20px; margin: 0; }
+        
+        /* UI Screens */
+        #start-screen, #result-screen { 
+            text-align: center; background: white; padding: 40px; border-radius: 20px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1); margin-top: 50px; min-width: 320px;
+        }
+        #result-screen { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1000; border: 4px solid var(--success); }
+
+        /* Buttons */
+        .diff-btn, .res-btn { padding: 12px 25px; margin: 10px; font-size: 1rem; cursor: pointer; border: none; border-radius: 8px; transition: 0.3s; color: white; font-weight: bold; }
+        .btn-easy { background: var(--success); } .btn-medium { background: #f39c12; } .btn-hard { background: var(--fail); }
+        .btn-retry { background: var(--accent); } .btn-main { background: #95a5a6; }
+        .diff-btn:hover, .res-btn:hover { opacity: 0.8; transform: translateY(-2px); }
+
+        /* Game Elements */
+        #game-container { display: none; flex-direction: column; align-items: center; }
+        .controls { margin-bottom: 20px; display: flex; gap: 15px; align-items: center; margin-top: 20px; }
+        .mode-btn { padding: 10px 20px; font-size: 1rem; font-weight: bold; cursor: pointer; border: none; border-radius: 8px; transition: 0.3s; background: #95a5a6; color: white; }
+        .mode-btn.active { background: var(--fail); box-shadow: 0 0 15px rgba(231, 76, 60, 0.4); }
+
+        #board { display: grid; gap: 4px; padding: 10px; background: #bdc3c7; border-radius: 12px; }
+        .tile { width: 50px; height: 50px; background: var(--tile-base); border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.2rem; position: relative; overflow: hidden; box-shadow: inset 0 -3px 0 rgba(0,0,0,0.1); }
+        .tile.revealed { background: #fff; cursor: default; box-shadow: none; }
+        .tile.defused { background: var(--success) !important; color: white; }
+        
+        /* Color Overlay */
+        .color-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; mix-blend-mode: multiply; pointer-events: none; z-index: 2; }
+        
+        /* Text Colors */
+        .n-1 { color: #FFD600; } .n-2 { color: #2979FF; } .n-3 { color: #FF1744; } 
+        .status-text { font-weight: bold; color: var(--accent); }
+        .trophy-icon { font-size: 80px; display: block; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+
+    <div id="start-screen">
+        <h1>EOD Specialist 🛠️</h1>
+        <p>Find all mines to earn your trophy!</p>
+        <button class="diff-btn btn-easy" onclick="startGame('easy')">Easy (8x8)</button>
+        <button class="diff-btn btn-medium" onclick="startGame('medium')">Medium (12x12)</button>
+        <button class="diff-btn btn-hard" onclick="startGame('hard')">Hard (16x16)</button>
+    </div>
+
+    <div id="result-screen">
+        <span id="res-icon" class="trophy-icon">🏆</span>
+        <h2 id="res-title">Mission Accomplished!</h2>
+        <p id="res-desc">Area is now safe.</p>
+        <button class="res-btn btn-retry" onclick="retryGame()">Play Again</button>
+        <button class="res-btn btn-main" onclick="goBack()">Main Menu</button>
+    </div>
+
+    <div id="game-container">
+        <div class="controls">
+            <button id="defuseBtn" class="mode-btn" onclick="toggleDefuseMode()">Defuse Mode: OFF</button>
+            <div id="mineCount" class="status-text">Mines Left: 0</div>
+        </div>
+        <div id="board" oncontextmenu="return false;"></div>
+    </div>
+
+    <script>
+        let currentLevel = 'easy', config = { size: 8, mines: 10 }, board = [], defuseMode = false, minesFound = 0;
+        const colors = { 1: "rgba(255, 214, 0, 0.4)", 2: "rgba(41, 121, 255, 0.4)", 3: "rgba(255, 23, 68, 0.4)" };
+
+        function startGame(level) {
+            currentLevel = level;
+            if(level === 'easy') config = { size: 8, mines: 10 };
+            else if(level === 'medium') config = { size: 12, mines: 25 };
+            else if(level === 'hard') config = { size: 16, mines: 50 };
+            document.getElementById('start-screen').style.display = 'none';
+            document.getElementById('result-screen').style.display = 'none';
+            document.getElementById('game-container').style.display = 'flex';
+            initGame();
+        }
+
+        function retryGame() { startGame(currentLevel); }
+        function goBack() { location.reload(); } // 가장 깔끔하게 초기화
+
+        function initGame() {
+            const el = document.getElementById('board');
+            el.style.gridTemplateColumns = `repeat(${config.size}, 1fr)`;
+            el.innerHTML = ''; minesFound = 0; toggleDefuseMode(false);
+            board = Array.from({length: config.size}, () => Array(config.size).fill(null).map(() => ({ isMine: false, revealed: false, defused: false, n: 0 })));
+            
+            let p = 0;
+            while(p < config.mines) {
+                let r = Math.floor(Math.random()*config.size), c = Math.floor(Math.random()*config.size);
+                if(!board[r][c].isMine) { board[r][c].isMine = true; p++; }
+            }
+            for(let r=0; r<config.size; r++) {
+                for(let c=0; c<config.size; c++) {
+                    let count = 0;
+                    for(let i=-1; i<=1; i++) for(let j=-1; j<=1; j++) if(board[r+i]?.[c+j]?.isMine) count++;
+                    board[r][c].n = count;
+                    createTile(r, c);
+                }
+            }
+            updateStatus();
+        }
+
+        function createTile(r, c) {
+            const tile = document.createElement('div');
+            tile.className = 'tile'; tile.id = `t-${r}-${c}`;
+            tile.onclick = () => handleTileClick(r, c);
+            document.getElementById('board').appendChild(tile);
+        }
+
+        function toggleDefuseMode(forceState) {
+            defuseMode = (typeof forceState === 'boolean') ? forceState : !defuseMode;
+            const btn = document.getElementById('defuseBtn');
+            btn.innerText = defuseMode ? "Defuse Mode: ON ⚡" : "Defuse Mode: OFF";
+            btn.classList.toggle('active', defuseMode);
+        }
+
+        function isNumberSatisfied(r, c) {
+            let defusedAround = 0;
+            for(let i=-1; i<=1; i++) for(let j=-1; j<=1; j++) if(board[r+i]?.[c+j]?.defused) defusedAround++;
+            return defusedAround === board[r][c].n;
+        }
+
+        // 특정 칸이 지뢰를 다 찾은 숫자에 인접해 있는지 확인
+        function isSafeZone(r, c) {
+            for(let i=-1; i<=1; i++) for(let j=-1; j<=1; j++) {
+                const nb = board[r+i]?.[c+j];
+                if(nb && nb.revealed && nb.n > 0 && isNumberSatisfied(r+i, c+j)) return true;
+            }
+            return false;
+        }
+
+        function handleTileClick(r, c) {
+            const d = board[r][c]; if(d.revealed || d.defused) return;
+            if (defuseMode) {
+                if (d.isMine) {
+                    d.defused = true; minesFound++;
+                    const el = document.getElementById(`t-${r}-${c}`);
+                    el.classList.add('defused'); el.innerText = '🛡️';
+                    toggleDefuseMode(false); updateStatus();
+                    if (minesFound === config.mines) showResult(true);
+                } else { showResult(false, "Mistake! That wasn't a mine."); }
+            } else {
+                if (d.isMine) showResult(false, "BOOM! You stepped on a mine.");
+                else reveal(r, c);
+            }
+            updateBoardColors(); // 클릭 시마다 색상 전체 갱신
+        }
+
+        function reveal(r, c) {
+            const d = board[r][c]; if(d.revealed || d.defused) return;
+            d.revealed = true; const el = document.getElementById(`t-${r}-${c}`);
+            el.classList.add('revealed');
+            if(d.n > 0) { el.innerText = d.n; el.classList.add(`n-${Math.min(d.n, 3)}`); }
+            else { for(let i=-1; i<=1; i++) for(let j=-1; j<=1; j++) if(board[r+i]?.[c+j]) reveal(r+i, c+j); }
+        }
+
+        function updateBoardColors() {
+            document.querySelectorAll('.color-overlay').forEach(el => el.remove());
+            for(let r=0; r<config.size; r++) {
+                for(let c=0; c<config.size; c++) {
+                    if (board[r][c].revealed && board[r][c].n > 0 && !isNumberSatisfied(r, c)) {
+                        applyInfluence(r, c, board[r][c].n);
+                    }
+                }
+            }
+        }
+
+        function applyInfluence(centerR, centerC, n) {
+            const color = colors[Math.min(n, 3)];
+            for(let i=-1; i<=1; i++) for(let j=-1; j<=1; j++) {
+                const nr = centerR + i, nc = centerC + j;
+                if (board[nr]?.[nc] && !board[nr][nc].revealed && !board[nr][nc].defused) {
+                    // 주변 어떤 숫자라도 이미 지뢰를 다 찾았다면 색칠 금지
+                    if (isSafeZone(nr, nc)) continue;
+                    
+                    const targetTile = document.getElementById(`t-${nr}-${nc}`);
+                    const overlay = document.createElement('div');
+                    overlay.className = 'color-overlay';
+                    overlay.style.backgroundColor = color;
+                    targetTile.appendChild(overlay);
+                }
+            }
+        }
+
+        function updateStatus() { document.getElementById('mineCount').innerText = `Mines Remaining: ${config.mines - minesFound}`; }
+
+        function showResult(success, msg) {
+            const screen = document.getElementById('result-screen');
+            document.getElementById('res-icon').innerText = success ? "🏆" : "💥";
+            document.getElementById('res-title').innerText = success ? "Mission Accomplished!" : "Mission Failed";
+            document.getElementById('res-desc').innerText = success ? "All mines defused safely. You are a hero!" : msg;
+            screen.style.borderColor = success ? "var(--success)" : "var(--fail)";
+            screen.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
